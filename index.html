@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Boolean Simplifier Dashboard</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b1f2a;--mu:#667085;--bd:#e2e5ee;--ac:#4f46e5;--ok:#16a34a;--bad:#dc2626;--one:#e0e7ff;--dc:#fef3c7;--g:#dcfce7;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1220;--card:#181c2e;--tx:#e8eaf3;--mu:#9aa3b8;--bd:#2a3050;--ac:#818cf8;--ok:#4ade80;--bad:#f87171;--one:#2b3170;--dc:#5a4a10;--g:#14532d;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1220;--card:#181c2e;--tx:#e8eaf3;--mu:#9aa3b8;--bd:#2a3050;--ac:#818cf8;--ok:#4ade80;--bad:#f87171;--one:#2b3170;--dc:#5a4a10;--g:#14532d;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:960px;margin:0 auto;padding:20px 16px 40px}
+h1{margin:0 0 2px;font-size:24px}.sub{color:var(--mu);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+.row{display:grid;grid-template-columns:3fr 1fr;gap:12px}@media(max-width:640px){.row{grid-template-columns:1fr}}
+label{font-size:12px;color:var(--mu);display:block;margin-bottom:4px}
+input{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:16px ui-monospace,Menlo,Consolas,monospace}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:99px;padding:4px 12px;cursor:pointer;font-size:13px}
+.chip:hover{border-color:var(--ac)}
+.met{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}@media(max-width:640px){.met{grid-template-columns:repeat(2,1fr)}}
+.m{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+.m b{display:block;font-size:20px}.m span{font-size:12px;color:var(--mu)}
+.res{font:600 20px ui-monospace,Menlo,Consolas,monospace;overflow-x:auto;padding:6px 0}
+.tag{font:12px system-ui;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.tab{padding:6px 14px;border-radius:8px;border:0;background:transparent;color:var(--mu);cursor:pointer;font-size:14px}
+.tab.on{background:var(--ac);color:#fff}
+.sc{overflow-x:auto}
+table{border-collapse:collapse;font:14px ui-monospace,Menlo,Consolas,monospace}
+th,td{border:1px solid var(--bd);padding:5px 12px;text-align:center}
+th{background:var(--bg);color:var(--mu);font-weight:600}
+td.o{background:var(--one);font-weight:700}td.x{background:var(--dc)}tr.o td{background:var(--one)}
+td.e{background:var(--g);font-weight:700}
+.err{color:var(--bad);font-weight:600}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.col{display:inline-block;vertical-align:top;margin:0 18px 10px 0;font:13px ui-monospace,Menlo,monospace}
+.col div{padding:1px 0}
+.hid{display:none}
+</style></head>
+<body><main>
+<h1>Boolean Expression Simplifier</h1>
+<p class="sub">Quine–McCluskey + Petrick’s method gives the exact minimal SOP and POS. Everything updates as you type.</p>
+
+<div class="card">
+ <div class="row">
+  <div><label for="ex">Boolean expression (use + | &amp; * ' ! ^ ( ) or AND / OR / NOT / XOR)</label>
+  <input id="ex" value="AB + A'C + BC" autocomplete="off" spellcheck="false"></div>
+  <div><label for="dc">Don’t-care minterms (e.g. 3,5)</label><input id="dc" placeholder="optional" autocomplete="off"></div>
+ </div>
+ <div class="chips" id="chips"></div>
+</div>
+<div id="err" class="err"></div>
+<div id="out">
+ <div class="met" id="met"></div>
+ <div class="card" style="margin-top:14px">
+  <div class="tag">Minimal SOP</div><div class="res" id="sop"></div>
+  <div class="tag">Minimal POS</div><div class="res" id="pos"></div>
+ </div>
+ <div class="card">
+  <div class="tabs" id="tabs"></div>
+  <div class="sc" id="pane"></div>
+ </div>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+/* ---------- parser ---------- */
+function tok(s){s=s.toUpperCase().replace(/\bAND\b/g,'&').replace(/\bOR\b/g,'|').replace(/\bNOT\b/g,'!').replace(/\bXOR\b/g,'^').replace(/[*.]/g,'&').replace(/\s+/g,'');
+ const t=s.match(/[A-Z]|[01]|[!~'&|+^()]/g)||[];if(t.join('')!==s)throw Error('Invalid character in expression');
+ const o=[];for(const x of t){const p=o[o.length-1];if(p&&/[A-Z01)']/.test(p)&&/[A-Z01(!~]/.test(x))o.push('&');o.push(x)}return o}
+function parse(t){let i=0;const pk=()=>t[i],eat=()=>t[i++];
+ const ex=()=>{let n=xr();while(pk()=='|'||pk()=='+'){eat();n=['or',n,xr()]}return n};
+ const xr=()=>{let n=an();while(pk()=='^'){eat();n=['xor',n,an()]}return n};
+ const an=()=>{let n=un();while(pk()=='&'){eat();n=['and',n,un()]}return n};
+ const un=()=>{if(pk()=='!'||pk()=='~'){eat();return['not',un()]}let n=at();while(pk()=="'"){eat();n=['not',n]}return n};
+ const at=()=>{const x=eat();if(x===undefined)throw Error('Unexpected end of expression');if(x=='('){const n=ex();if(eat()!=')')throw Error('Missing )');return n}
+  if(x=='0'||x=='1')return['c',+x];if(/[A-Z]/.test(x))return['v',x];throw Error('Unexpected '+x)};
+ const n=ex();if(i<t.length)throw Error('Unexpected '+t[i]);return n}
+const ev=(n,e)=>n[0]=='v'?e[n[1]]:n[0]=='c'?n[1]:n[0]=='not'?1-ev(n[1],e):(a=>{const b=ev(n[2],e);return n[0]=='and'?a&b:n[0]=='or'?a|b:a^b})(ev(n[1],e));
+const vars=n=>n[0]=='v'?[n[1]]:n[0]=='c'?[]:n.slice(1).flatMap(vars);
+/* ---------- Quine-McCluskey ---------- */
+const bits=(m,n)=>m.toString(2).padStart(n,'0'),cnt=s=>s.split('1').length,L=p=>p.replace(/-/g,'').length;
+const cov=(p,m,n)=>{const b=bits(m,n);return[...p].every((c,i)=>c=='-'||c==b[i])};
+const comb=(a,b)=>{let d=-1;for(let i=0;i<a.length;i++)if(a[i]!=b[i]){if(d>=0||a[i]=='-'||b[i]=='-')return null;d=i}return d<0?null:a.slice(0,d)+'-'+a.slice(d+1)};
+function primes(terms,n){let cur=new Set(terms.map(m=>bits(m,n))),P=new Set(),steps=[];
+ while(cur.size){const a=[...cur].sort((x,y)=>cnt(x)-cnt(y)||(x<y?-1:1));steps.push(a);const nx=new Set(),u=new Set();
+  for(let i=0;i<a.length;i++)for(let j=i+1;j<a.length;j++){const c=comb(a[i],a[j]);if(c){nx.add(c);u.add(a[i]);u.add(a[j])}}
+  a.forEach(x=>{if(!u.has(x))P.add(x)});cur=nx}
+ return{P:[...P].sort(),steps}}
+function petrick(rest,cols){let prod=[[]];
+ for(const m of cols){const s=Object.keys(rest).filter(p=>rest[p].has(m)),nw=[],seen=new Set();
+  for(const a of prod)for(const p of s){const b=a.includes(p)?a:[...a,p].sort(),k=b.join('|');if(!seen.has(k)){seen.add(k);nw.push(b)}}
+  prod=nw.filter(a=>!nw.some(b=>b!==a&&b.length<a.length&&b.every(x=>a.includes(x))))}
+ prod.sort((a,b)=>a.length-b.length||a.reduce((s,p)=>s+L(p),0)-b.reduce((s,p)=>s+L(p),0));return prod[0]}
+function minim(ms,dc,n){if(!ms.length)return{P:[],E:[],C:[],steps:[],chart:{}};
+ const{P,steps}=primes([...ms,...dc],n),chart={};P.forEach(p=>chart[p]=new Set(ms.filter(m=>cov(p,m,n))));
+ const E=[];ms.forEach(m=>{const c=P.filter(p=>chart[p].has(m));if(c.length==1&&!E.includes(c[0]))E.push(c[0])});
+ const left=ms.filter(m=>!E.some(p=>chart[p].has(m)));let C=[...E];
+ if(left.length){const rest={};P.forEach(p=>{if(!E.includes(p)){const s=new Set([...chart[p]].filter(m=>left.includes(m)));if(s.size)rest[p]=s}});C=C.concat(petrick(rest,left))}
+ return{P,E,C,steps,chart}}
+/* ---------- formatting ---------- */
+const term=(p,vs)=>[...p].map((c,i)=>c=='-'?'':vs[i]+(c=='0'?"'":'')).join('');
+const sop=(C,vs)=>!C.length?'0':C.length==1&&/^-+$/.test(C[0])?'1':C.map(p=>term(p,vs)).join(' + ');
+const pos=(C,vs)=>!C.length?'1':C.length==1&&/^-+$/.test(C[0])?'0':C.map(p=>{const s=[...p].map((c,i)=>c=='-'?null:vs[i]+(c=='0'?'':"'")).filter(Boolean).join(' + ');return s.includes('+')?'('+s+')':s}).join('');
+function simplify(expr,dcs){const ast=parse(tok(expr)),vs=[...new Set(vars(ast))].sort(),n=vs.length;
+ if(n>8)throw Error('Please use 8 variables or fewer');
+ const rows=[];for(let i=0;i<2**n;i++){const b=bits(i,n),e={};vs.forEach((v,k)=>e[v]=+b[k]);rows.push(ev(ast,e))}
+ const dc=dcs.filter(d=>d>=0&&d<2**n),idx=[...rows.keys()];
+ const ones=idx.filter(i=>rows[i]&&!dc.includes(i)),zeros=idx.filter(i=>!rows[i]&&!dc.includes(i));
+ const r1=minim(ones,dc,n),r0=minim(zeros,dc,n);
+ const ok=idx.every(i=>dc.includes(i)||(+r1.C.some(p=>cov(p,i,n)))==rows[i]);
+ return{vs,n,rows,ones,zeros,dc,r1,sop:sop(r1.C,vs),pos:pos(r0.C,vs),ok}}
+/* ---------- views ---------- */
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let R,tab='Truth table';
+const views={
+'Truth table':()=>{let h='<table><tr>'+R.vs.map(v=>`<th>${v}</th>`).join('')+'<th>m</th><th>F</th></tr>';
+ R.rows.forEach((f,i)=>{const x=R.dc.includes(i);h+=`<tr class="${f&&!x?'o':''}">`+[...bits(i,R.n)].map(b=>`<td>${b}</td>`).join('')+`<td>${i}</td><td>${x?'X':f}</td></tr>`});
+ return h+`</table><p class="sub">Σm = ${JSON.stringify(R.ones)} · ΠM = ${JSON.stringify(R.zeros)}${R.dc.length?' · d = '+JSON.stringify(R.dc):''}</p>`},
+'K-map':()=>{if(R.n<2||R.n>4)return'<p class="sub">The K-map is shown for 2–4 variables.</p>';
+ const g={1:['0','1'],2:['00','01','11','10']},rb=R.n>>1,cb=R.n-rb,Rw=g[rb],Cl=g[cb],cell=i=>R.dc.includes(i)?['X','x']:[R.rows[i],R.rows[i]?'o':''];
+ let h=`<table><tr><th>${R.vs.slice(0,rb).join('')}\\${R.vs.slice(rb).join('')}</th>`+Cl.map(c=>`<th>${c}</th>`).join('')+'</tr>';
+ Rw.forEach(r=>{h+=`<tr><th>${r}</th>`+Cl.map(c=>{const[t,k]=cell(parseInt(r+c,2));return`<td class="${k}">${t}</td>`}).join('')+'</tr>'});
+ return h+'</table><p class="sub">Gray-code ordering: adjacent cells differ by one variable.</p>'},
+'QM steps':()=>{if(!R.r1.steps.length)return'<p class="sub">No minterms: F = 0.</p>';
+ let h=R.r1.steps.map((c,i)=>`<div class="col"><b>Column ${i+1}${i?'':' (minterms)'}</b>`+c.map(x=>`<div>${x}</div>`).join('')+'</div>').join('');
+ const f=a=>a.map(p=>`${term(p,R.vs)||'1'} (${p})`).join(', ')||'none';
+ return h+`<p>Prime implicants: ${esc(f(R.r1.P))}</p><p>Essential: ${esc(f(R.r1.E))}</p>`},
+'PI chart':()=>{const ms=R.ones;if(!ms.length)return'<p class="sub">Nothing to cover.</p>';
+ let h='<table><tr><th>Implicant</th>'+ms.map(m=>`<th>${m}</th>`).join('')+'<th>Used</th></tr>';
+ R.r1.P.forEach(p=>{h+=`<tr><td>${esc(term(p,R.vs)||'1')}</td>`+ms.map(m=>`<td class="${R.r1.chart[p].has(m)?(R.r1.E.includes(p)?'e':'o'):''}">${R.r1.chart[p].has(m)?'✔':''}</td>`).join('')+`<td>${R.r1.C.includes(p)?'✔':''}</td></tr>`});
+ return h+'</table><p class="sub">Green rows are essential prime implicants; blue ticks are other covers.</p>'}};
+function drawTabs(){$('tabs').innerHTML=Object.keys(views).map(k=>`<button class="tab ${k==tab?'on':''}" data-k="${k}">${k}</button>`).join('');
+ $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{tab=b.dataset.k;drawTabs()});$('pane').innerHTML=views[tab]()}
+function run(){const e=$('ex').value;$('err').textContent='';
+ try{const d=$('dc').value.split(',').map(s=>s.trim()).filter(Boolean).map(Number);if(d.some(isNaN))throw Error('Don’t-cares must be numbers');
+  R=simplify(e,d);$('out').classList.remove('hid');
+  const lin=s=>(s.match(/[A-Z]/g)||[]).length;
+  $('met').innerHTML=[['Variables',R.n],['Literals in → out',lin(e.toUpperCase())+' → '+lin(R.sop)],['Prime implicants',R.r1.P.length],['Equivalence',R.ok?'<span class="ok">Passed ✔</span>':'<span class="bad">Failed ✘</span>']].map(([a,b])=>`<div class="m"><span>${a}</span><b>${b}</b></div>`).join('');
+  $('sop').textContent='F = '+R.sop;$('pos').textContent='F = '+R.pos;drawTabs()}
+ catch(x){$('err').textContent='Error: '+x.message;$('out').classList.add('hid')}}
+[["Consensus","AB + A'C + BC"],["Majority","AB + BC + AC + ABC"],["XOR","A ^ B ^ C"],["4-var","A'B'C'D' + A'B'CD' + AB'C'D' + AB'CD' + ABCD"],["Absorption","A + AB"],["De Morgan","!(A & B) | C"]]
+ .forEach(([n,x])=>{const b=document.createElement('button');b.className='chip';b.textContent=n;b.onclick=()=>{$('ex').value=x;run()};$('chips').appendChild(b)});
+$('ex').oninput=run;$('dc').oninput=run;run();
+</script></body></html>
